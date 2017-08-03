@@ -1,14 +1,13 @@
 defmodule PaperTrail do
   import Ecto.Changeset
+  import PaperTrail.RepoClient, only: [repo: 0]
 
   alias PaperTrail.VersionQueries
-
   alias Ecto.Multi
   alias PaperTrail.Version
 
   @client PaperTrail.RepoClient
   @originator @client.originator()
-  @repo @client.repo()
 
   @doc """
   Gets all the versions of a record given a module and its id
@@ -67,40 +66,40 @@ defmodule PaperTrail do
             })
           end
           initial_version = make_version_struct(%{event: "insert"}, changeset_data, options)
-          @repo.insert(initial_version)
+          repo().insert(initial_version)
         end)
         |> Multi.run(:model, fn %{initial_version: initial_version} ->
           updated_changeset = changeset |> change(%{
             first_version_id: initial_version.id, current_version_id: initial_version.id
           })
-          @repo.insert(updated_changeset)
+          repo().insert(updated_changeset)
         end)
         |> Multi.run(:version, fn %{initial_version: initial_version, model: model} ->
           target_version = make_version_struct(%{event: "insert"}, model, options) |> serialize()
-          Version.changeset(initial_version, target_version) |> @repo.update
+          Version.changeset(initial_version, target_version) |> repo().update
         end)
       _ ->
         Multi.new
         |> Multi.insert(:model, changeset)
         |> Multi.run(:version, fn %{model: model} ->
           version = make_version_struct(%{event: "insert"}, model, options)
-          @repo.insert(version)
+          repo().insert(version)
         end)
     end
 
-    transaction = @repo.transaction(transaction_order)
+    transaction = repo().transaction(transaction_order)
 
     case @client.strict_mode() do
       true ->
         case transaction do
           {:error, :model, changeset, %{}} ->
             filtered_changes = Map.drop(changeset.changes, [:current_version_id, :first_version_id])
-            {:error, Map.merge(changeset, %{repo: @repo, changes: filtered_changes})}
+            {:error, Map.merge(changeset, %{repo: repo(), changes: filtered_changes})}
           {:ok, map} -> {:ok, Map.drop(map, [:initial_version])}
         end
       _ ->
         case transaction do
-          {:error, :model, changeset, %{}} -> {:error, Map.merge(changeset, %{repo: @repo})}
+          {:error, :model, changeset, %{}} -> {:error, Map.merge(changeset, %{repo: repo()})}
           _ -> transaction
         end
     end
@@ -110,7 +109,7 @@ defmodule PaperTrail do
   Same as insert/2 but returns only the model struct or raises if the changeset is invalid.
   """
   def insert!(changeset, options \\ [origin: nil, meta: nil, originator: nil]) do
-    @repo.transaction(fn ->
+    repo().transaction(fn ->
       case @client.strict_mode() do
         true ->
           version_id = get_sequence_id("versions") + 1
@@ -127,17 +126,17 @@ defmodule PaperTrail do
             })
           end
           initial_version = make_version_struct(%{event: "insert"}, changeset_data, options)
-            |> @repo.insert!
+            |> repo().insert!
           updated_changeset = changeset |> change(%{
             first_version_id: initial_version.id, current_version_id: initial_version.id
           })
-          model = @repo.insert!(updated_changeset)
+          model = repo().insert!(updated_changeset)
           target_version = make_version_struct(%{event: "insert"}, model, options) |> serialize()
-          Version.changeset(initial_version, target_version) |> @repo.update!
+          Version.changeset(initial_version, target_version) |> repo().update!
           model
         _ ->
-          model = @repo.insert!(changeset)
-          make_version_struct(%{event: "insert"}, model, options) |> @repo.insert!
+          model = repo().insert!(changeset)
+          make_version_struct(%{event: "insert"}, model, options) |> repo().insert!
           model
       end
     end) |> elem(1)
@@ -156,40 +155,40 @@ defmodule PaperTrail do
           })
           target_changeset = changeset |> Map.merge(%{data: version_data})
           target_version = make_version_struct(%{event: "update"}, target_changeset, options)
-          @repo.insert(target_version)
+          repo().insert(target_version)
         end)
         |> Multi.run(:model, fn %{initial_version: initial_version} ->
           updated_changeset = changeset |> change(%{current_version_id: initial_version.id})
-          @repo.update(updated_changeset)
+          repo().update(updated_changeset)
         end)
         |> Multi.run(:version, fn %{initial_version: initial_version} ->
           new_item_changes = initial_version.item_changes |> Map.merge(%{
             current_version_id: initial_version.id
           })
-          initial_version |> change(%{item_changes: new_item_changes}) |> @repo.update
+          initial_version |> change(%{item_changes: new_item_changes}) |> repo().update
         end)
       _ ->
         Multi.new
         |> Multi.update(:model, changeset)
         |> Multi.run(:version, fn %{model: _model} ->
           version = make_version_struct(%{event: "update"}, changeset, options)
-          @repo.insert(version)
+          repo().insert(version)
         end)
     end
 
-    transaction = @repo.transaction(transaction_order)
+    transaction = repo().transaction(transaction_order)
 
     case @client.strict_mode() do
       true ->
         case transaction do
           {:error, :model, changeset, %{}} ->
             filtered_changes = Map.drop(changeset.changes, [:current_version_id])
-            {:error, Map.merge(changeset, %{repo: @repo, changes: filtered_changes})}
+            {:error, Map.merge(changeset, %{repo: repo(), changes: filtered_changes})}
           {:ok, map} -> {:ok, Map.delete(map, :initial_version)}
         end
       _ ->
         case transaction do
-          {:error, :model, changeset, %{}} -> {:error, Map.merge(changeset, %{repo: @repo})}
+          {:error, :model, changeset, %{}} -> {:error, Map.merge(changeset, %{repo: repo()})}
           _ -> transaction
         end
     end
@@ -199,7 +198,7 @@ defmodule PaperTrail do
   Same as update/2 but returns only the model struct or raises if the changeset is invalid.
   """
   def update!(changeset, options \\ [origin: nil, meta: nil, originator: nil]) do
-    @repo.transaction(fn ->
+    repo().transaction(fn ->
       case @client.strict_mode() do
         true ->
           version_data = changeset.data |> Map.merge(%{
@@ -207,18 +206,18 @@ defmodule PaperTrail do
           })
           target_changeset = changeset |> Map.merge(%{data: version_data})
           target_version = make_version_struct(%{event: "update"}, target_changeset, options)
-          initial_version = @repo.insert!(target_version)
+          initial_version = repo().insert!(target_version)
           updated_changeset = changeset |> change(%{current_version_id: initial_version.id})
-          model = @repo.update!(updated_changeset)
+          model = repo().update!(updated_changeset)
           new_item_changes = initial_version.item_changes |> Map.merge(%{
             current_version_id: initial_version.id
           })
-          initial_version |> change(%{item_changes: new_item_changes}) |> @repo.update!
+          initial_version |> change(%{item_changes: new_item_changes}) |> repo().update!
           model
         _ ->
-          model = @repo.update!(changeset)
+          model = repo().update!(changeset)
           version_struct = make_version_struct(%{event: "update"}, changeset, options)
-          @repo.insert!(version_struct)
+          repo().insert!(version_struct)
           model
       end
     end) |> elem(1)
@@ -232,12 +231,12 @@ defmodule PaperTrail do
       |> Multi.delete(:model, struct)
       |> Multi.run(:version, fn %{} ->
         version = make_version_struct(%{event: "delete"}, struct, options)
-        @repo.insert(version)
+        repo().insert(version)
       end)
-      |> @repo.transaction
+      |> repo().transaction
 
     case transaction do
-      {:error, :model, changeset, %{}} -> {:error, Map.merge(changeset, %{repo: @repo})}
+      {:error, :model, changeset, %{}} -> {:error, Map.merge(changeset, %{repo: repo()})}
       _ -> transaction
     end
   end
@@ -246,10 +245,10 @@ defmodule PaperTrail do
   Same as delete/2 but returns only the model struct or raises if the changeset is invalid.
   """
   def delete!(struct, options \\ [origin: nil, meta: nil, originator: nil]) do
-    @repo.transaction(fn ->
-      model = @repo.delete!(struct)
+    repo().transaction(fn ->
+      model = repo().delete!(struct)
       version_struct = make_version_struct(%{event: "delete"}, struct, options)
-      @repo.insert!(version_struct)
+      repo().insert!(version_struct)
       model
     end) |> elem(1)
   end
@@ -309,7 +308,7 @@ defmodule PaperTrail do
   end
 
   defp get_sequence_id(table_name) do
-    Ecto.Adapters.SQL.query!(@repo, "select last_value FROM #{table_name}_id_seq").rows
+    Ecto.Adapters.SQL.query!(repo(), "select last_value FROM #{table_name}_id_seq").rows
     |> List.first
     |> List.first
   end

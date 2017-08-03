@@ -33,7 +33,7 @@ defmodule PaperTrailTest.UUIDTest do
     admin =
       %Admin{}
       |> Admin.changeset(%{email: "admin@example.com"})
-      |> repo.insert!
+      |> repo().insert!
 
     product =
       %Product{}
